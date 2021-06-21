@@ -303,7 +303,7 @@ data:
 
   Corefile: |
     (empty) {
-      file /etc/coredns/empty.db
+        file /etc/coredns/empty.db
     }
 
     .:53 {
@@ -328,10 +328,9 @@ data:
         forward . /etc/resolv.conf {
             expire 30s
         }
-
-        {{if not .DNSServiceIPv6 }}
+        {{- if not .DNSServiceIPv6 }}
         rewrite stop type AAAA A
-        {{end}}
+        {{- end }}
         cache 30
         loop
         reload
@@ -453,24 +452,24 @@ spec:
     k8s-app: kube-dns
   clusterIP: {{ .DNSServiceIP }}
   clusterIPs:
-  {{if .DNSServiceIP }}
-  - {{ .DNSServiceIP }}
-  {{end}}
-  {{if .DNSServiceIPv6 }}
-  - {{ .DNSServiceIPv6 }}
-  {{end}}
+  {{- if .DNSServiceIP }}
+    - {{ .DNSServiceIP }}
+  {{- end }}
+  {{- if .DNSServiceIPv6 }}
+    - {{ .DNSServiceIPv6 }}
+  {{- end }}
   ipFamilies:
-  {{if .DNSServiceIP }}
-  - IPv4
-  {{end}}
-  {{if .DNSServiceIPv6 }}
-  - IPv6
-  {{end}}
-  {{if and .DNSServiceIP .DNSServiceIPv6 }}
+  {{- if .DNSServiceIP }}
+    - IPv4
+  {{- end }}
+  {{- if .DNSServiceIPv6 }}
+    - IPv6
+  {{- end }}
+  {{- if and .DNSServiceIP .DNSServiceIPv6 }}
   ipFamilyPolicy: RequireDualStack
-  {{else}}
+  {{- else }}
   ipFamilyPolicy: SingleStack
-  {{end}}
+  {{- end }}
   ports:
     - name: dns
       port: 53
