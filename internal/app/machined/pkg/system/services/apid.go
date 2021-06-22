@@ -117,13 +117,13 @@ func (o *APID) Runner(r runtime.Runtime) (runner.Runner, error) {
 		{Type: "bind", Destination: filepath.Dir(constants.APISocketPath), Source: filepath.Dir(constants.APISocketPath), Options: []string{"rbind", "rw"}},
 	}
 
-	if isWorker {
-		// worker requires kubelet config to refresh the certs via Kubernetes
-		mounts = append(mounts,
-			specs.Mount{Type: "bind", Destination: filepath.Dir(constants.KubeletKubeconfig), Source: constants.SystemKubeletPKIDir, Options: []string{"rbind", "ro"}},
-			specs.Mount{Type: "bind", Destination: constants.KubeletPKIDir, Source: constants.SystemKubeletPKIDir, Options: []string{"rbind", "ro"}},
-		)
-	}
+	// if isWorker {
+	// 	// worker requires kubelet config to refresh the certs via Kubernetes
+	// 	mounts = append(mounts,
+	// 		specs.Mount{Type: "bind", Destination: filepath.Dir(constants.KubeletKubeconfig), Source: constants.KubernetesKubeletSecretsDir, Options: []string{"rbind", "ro"}},
+	// 		specs.Mount{Type: "bind", Destination: constants.KubeletPKIDir, Source: constants.KubernetesKubeletSecretsDir, Options: []string{"rbind", "ro"}},
+	// 	)
+	// }
 
 	env := []string{}
 
@@ -191,14 +191,8 @@ func (o *APID) HealthSettings(runtime.Runtime) *health.Settings {
 
 func (o *APID) syncKubeletPKI() {
 	copyAll := func() {
-		if err := copy.Dir(constants.KubeletPKIDir, constants.SystemKubeletPKIDir, copy.WithMode(0o700)); err != nil {
-			log.Printf("failed to sync %s dir contents into %s: %s", constants.KubeletPKIDir, constants.SystemKubeletPKIDir, err)
-
-			return
-		}
-
-		if err := copy.File(constants.KubeletKubeconfig, filepath.Join(constants.SystemKubeletPKIDir, filepath.Base(constants.KubeletKubeconfig)), copy.WithMode(0o700)); err != nil {
-			log.Printf("failed to sync %s into %s: %s", constants.KubeletKubeconfig, constants.SystemKubeletPKIDir, err)
+		if err := copy.Dir(constants.KubeletPKIDir, constants.KubernetesKubeletSecretsDir, copy.WithMode(0o700)); err != nil {
+			log.Printf("failed to sync %s dir contents into %s: %s", constants.KubeletPKIDir, constants.KubernetesKubeletSecretsDir, err)
 
 			return
 		}

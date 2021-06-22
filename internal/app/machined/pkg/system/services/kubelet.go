@@ -19,7 +19,6 @@ import (
 	containerdapi "github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
-	cni "github.com/containerd/go-cni"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
@@ -41,10 +40,30 @@ import (
 	timeresource "github.com/talos-systems/talos/pkg/resources/time"
 )
 
-var kubeletKubeConfigTemplate = []byte(`apiVersion: v1
+var KubeletKubeconfigTemplate = []byte(`apiVersion: v1
 kind: Config
 clusters:
-- name: local
+- name: default-cluster
+  cluster:
+    server: {{ .Server }}
+    certificate-authority-data: {{ .CACert }}
+contexts:
+- context:
+    cluster: default-cluster
+    namespace: default
+    user: kubelet
+preferences: {}
+users:
+- name: kubelet
+  user:
+    client-certificate: {{ .KubeletPKIDir }}/kubelet-client-current.pem
+    client-key: {{ .KubeletPKIDir }}/kubelet-client-current.pem
+`)
+
+var KubeletBootstrapKubeconfigTemplate = []byte(`apiVersion: v1
+kind: Config
+clusters:
+- name: default-cluster
   cluster:
     server: {{ .Server }}
     certificate-authority-data: {{ .CACert }}
@@ -54,7 +73,7 @@ users:
     token: {{ .BootstrapTokenID }}.{{ .BootstrapTokenSecret }}
 contexts:
 - context:
-    cluster: local
+    cluster: default-cluster
     user: kubelet
 `)
 
@@ -69,39 +88,20 @@ func (k *Kubelet) ID(r runtime.Runtime) string {
 
 // PreFunc implements the Service interface.
 func (k *Kubelet) PreFunc(ctx context.Context, r runtime.Runtime) error {
-	cfg := struct {
-		Server               string
-		CACert               string
-		BootstrapTokenID     string
-		BootstrapTokenSecret string
-	}{
-		Server:               r.Config().Cluster().Endpoint().String(),
-		CACert:               base64.StdEncoding.EncodeToString(r.Config().Cluster().CA().Crt),
-		BootstrapTokenID:     r.Config().Cluster().Token().ID(),
-		BootstrapTokenSecret: r.Config().Cluster().Token().Secret(),
-	}
 
-	templ := template.Must(template.New("tmpl").Parse(string(kubeletKubeConfigTemplate)))
-
-	var buf bytes.Buffer
-
-	if err := templ.Execute(&buf, cfg); err != nil {
+	if err := writeKubeletKubeconfig(r); err != nil {
 		return err
 	}
 
-	if err := ioutil.WriteFile(constants.KubeletBootstrapKubeconfig, buf.Bytes(), 0o600); err != nil {
+	if err := writeKubeletConfigYaml(r); err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(constants.KubernetesCACert), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(constants.KubeletCACert), 0o700); err != nil {
 		return err
 	}
 
-	if err := ioutil.WriteFile(constants.KubernetesCACert, r.Config().Cluster().CA().Crt, 0o500); err != nil {
-		return err
-	}
-
-	if err := writeKubeletConfig(r); err != nil {
+	if err := ioutil.WriteFile(constants.KubeletCACert, r.Config().Cluster().CA().Crt, 0o400); err != nil {
 		return err
 	}
 
@@ -160,7 +160,8 @@ func (k *Kubelet) Runner(r runtime.Runtime) (runner.Runner, error) {
 		{Type: "sysfs", Destination: "/sys", Source: "/sys", Options: []string{"bind", "ro"}},
 		{Type: "bind", Destination: "/sys/fs/cgroup", Source: "/sys/fs/cgroup", Options: []string{"rbind", "rshared", "rw"}},
 		{Type: "bind", Destination: "/lib/modules", Source: "/lib/modules", Options: []string{"bind", "ro"}},
-		{Type: "bind", Destination: "/etc/kubernetes", Source: "/etc/kubernetes", Options: []string{"bind", "rshared", "rw"}},
+		{Type: "bind", Destination: constants.KubernetesKubeletSecretsDir, Source: constants.KubernetesKubeletSecretsDir, Options: []string{"bind", "ro"}},
+		{Type: "bind", Destination: "/etc/kubernetes/manifests", Source: "/etc/kubernetes/manifests", Options: []string{"bind", "ro"}},
 		{Type: "bind", Destination: "/etc/os-release", Source: "/etc/os-release", Options: []string{"bind", "ro"}},
 		{Type: "bind", Destination: "/etc/cni", Source: "/etc/cni", Options: []string{"rbind", "rshared", "rw"}},
 		{Type: "bind", Destination: "/usr/libexec/kubernetes", Source: "/usr/libexec/kubernetes", Options: []string{"rbind", "rshared", "rw"}},
@@ -256,7 +257,7 @@ func newKubeletConfiguration(clusterDNS []string, dnsDomain string) *kubeletconf
 		RotateCertificates: true,
 		Authentication: kubeletconfig.KubeletAuthentication{
 			X509: kubeletconfig.KubeletX509Authentication{
-				ClientCAFile: constants.KubernetesCACert,
+				ClientCAFile: constants.KubeletCACert,
 			},
 			Webhook: kubeletconfig.KubeletWebhookAuthentication{
 				Enabled: &t,
@@ -268,10 +269,12 @@ func newKubeletConfiguration(clusterDNS []string, dnsDomain string) *kubeletconf
 		Authorization: kubeletconfig.KubeletAuthorization{
 			Mode: kubeletconfig.KubeletAuthorizationModeWebhook,
 		},
-		ClusterDomain:       dnsDomain,
-		ClusterDNS:          clusterDNS,
-		SerializeImagePulls: &f,
-		FailSwapOn:          &f,
+
+		ClusterDomain:        dnsDomain,
+		ClusterDNS:           clusterDNS,
+		SerializeImagePulls:  &f,
+		FailSwapOn:           &f,
+		SystemReservedCgroup: "system",
 	}
 }
 
@@ -284,13 +287,10 @@ func (k *Kubelet) args(r runtime.Runtime) ([]string, error) {
 	denyListArgs := argsbuilder.Args{
 		"bootstrap-kubeconfig":       constants.KubeletBootstrapKubeconfig,
 		"kubeconfig":                 constants.KubeletKubeconfig,
+		"config":                     constants.KubeletConfig,
+		"cert-dir":                   constants.KubeletPKIDir,
 		"container-runtime":          "remote",
 		"container-runtime-endpoint": "unix://" + constants.CRIContainerdAddress,
-		"config":                     "/etc/kubernetes/kubelet.yaml",
-		"dynamic-config-dir":         "/etc/kubernetes/kubelet",
-
-		"cert-dir":     constants.KubeletPKIDir,
-		"cni-conf-dir": cni.DefaultNetDir,
 
 		"hostname-override": nodename,
 	}
@@ -312,7 +312,49 @@ func (k *Kubelet) args(r runtime.Runtime) ([]string, error) {
 	return denyListArgs.Merge(extraArgs).Args(), nil
 }
 
-func writeKubeletConfig(r runtime.Runtime) error {
+func writeKubeletKubeconfig(r runtime.Runtime) error {
+	cfg := struct {
+		Server               string
+		CACert               string
+		KubeletPKIDir        string
+		BootstrapTokenID     string
+		BootstrapTokenSecret string
+	}{
+		Server:               r.Config().Cluster().Endpoint().String(),
+		CACert:               base64.StdEncoding.EncodeToString(r.Config().Cluster().CA().Crt),
+		KubeletPKIDir:        constants.KubeletPKIDir,
+		BootstrapTokenID:     r.Config().Cluster().Token().ID(),
+		BootstrapTokenSecret: r.Config().Cluster().Token().Secret(),
+	}
+
+	var buf bytes.Buffer
+
+	templKubeconfig := template.Must(template.New("tmpl").Parse(string(KubeletKubeconfigTemplate)))
+	if err := templKubeconfig.Execute(&buf, cfg); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(constants.KubeletKubeconfig), 0o700); err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile(constants.KubeletKubeconfig, buf.Bytes(), 0o400); err != nil {
+		return err
+	}
+
+	templBootstrap := template.Must(template.New("tmpl").Parse(string(KubeletBootstrapKubeconfigTemplate)))
+	if err := templBootstrap.Execute(&buf, cfg); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(constants.KubeletBootstrapKubeconfig), 0o700); err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(constants.KubeletBootstrapKubeconfig, buf.Bytes(), 0o400)
+}
+
+func writeKubeletConfigYaml(r runtime.Runtime) error {
 	dnsServiceIPs, err := r.Config().Cluster().Network().DNSServiceIPs()
 	if err != nil {
 		return fmt.Errorf("failed to get DNS service IPs: %w", err)
@@ -343,5 +385,5 @@ func writeKubeletConfig(r runtime.Runtime) error {
 		return err
 	}
 
-	return ioutil.WriteFile("/etc/kubernetes/kubelet.yaml", buf.Bytes(), 0o600)
+	return ioutil.WriteFile(constants.KubeletConfig, buf.Bytes(), 0o600)
 }

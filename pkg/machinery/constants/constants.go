@@ -177,21 +177,33 @@ const (
 	// KubernetesSchedulerSecretsDir defines ephemeral directory with kube-scheduler secrets.
 	KubernetesSchedulerSecretsDir = KubebernetesStaticSecretsDir + "/" + "kube-scheduler"
 
+	// KubernetesKubeletSecretsDir defines ephemeral directory with kubelet secrets and configs.
+	KubernetesKubeletSecretsDir = KubebernetesStaticSecretsDir + "/" + "kubelet"
+
 	// KubernetesRunUser defines UID to run control plane components.
 	KubernetesRunUser = 65534
-
-	// KubeletBootstrapKubeconfig is the path to the kubeconfig required to
-	// bootstrap the kubelet.
-	KubeletBootstrapKubeconfig = "/etc/kubernetes/bootstrap-kubeconfig"
 
 	// KubeletPort is the kubelet port for secure API.
 	KubeletPort = 10250
 
+	// KubeletConfig
+	KubeletConfig = "/var/lib/kubelet/kubelet.yaml"
+
+	// KubeletKubeconfig is the generated kubeconfig for kubelet.
+	KubeletKubeconfig = "/var/lib/kubelet/kubeconfig"
+
+	// KubeletBootstrapKubeconfig is the path to the kubeconfig required to
+	// bootstrap the kubelet.
+	KubeletBootstrapKubeconfig = KubernetesKubeletSecretsDir + "/" + "bootstrap"
+
+	// KubeletOrganization defines Organization value of kubelet client/server certificate.
+	KubeletOrganization = "system:nodes"
+
 	// KubeletPKIDir is the path to the directory where kubelet stores issued certificates and keys.
 	KubeletPKIDir = "/var/lib/kubelet/pki"
 
-	// SystemKubeletPKIDir is the path to the directory where Talos copies kubelet issued certificates and keys.
-	SystemKubeletPKIDir = "/system/secrets/kubelet"
+	// KubeletCACert
+	KubeletCACert = KubeletPKIDir + "/" + "ca.crt"
 
 	// DefaultKubernetesVersion is the default target version of the control plane.
 	DefaultKubernetesVersion = "1.21.2"
@@ -234,9 +246,6 @@ const (
 
 	// TalosManifestPrefix is the prefix for static pod files created in ManifestsDirectory by Talos.
 	TalosManifestPrefix = "talos-"
-
-	// KubeletKubeconfig is the generated kubeconfig for kubelet.
-	KubeletKubeconfig = "/etc/kubernetes/kubeconfig-kubelet"
 
 	// DefaultEtcdVersion is the default target version of etcd.
 	DefaultEtcdVersion = "v3.4.16"
