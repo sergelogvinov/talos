@@ -191,6 +191,7 @@ func (ctrl *LinkConfigController) Run(ctx context.Context, r controller.Runtime,
 						{
 							Name:        linkStatus.Metadata().ID(),
 							Up:          true,
+							AcceptRA:    true,
 							ConfigLayer: network.ConfigDefault,
 						},
 					})
@@ -301,6 +302,7 @@ func (ctrl *LinkConfigController) parseMachineConfiguration(logger *zap.Logger, 
 			linkMap[device.Interface()] = &network.LinkSpecSpec{
 				Name:        device.Interface(),
 				Up:          true,
+				AcceptRA:    true,
 				ConfigLayer: network.ConfigMachineConfiguration,
 			}
 		}
@@ -358,6 +360,7 @@ func vlanLink(linkName string, vlan talosconfig.Vlan) network.LinkSpecSpec {
 		Name:       fmt.Sprintf("%s.%d", linkName, vlan.ID()),
 		Logical:    true,
 		Up:         true,
+		AcceptRA:   true,
 		MTU:        vlan.MTU(),
 		Kind:       network.LinkKindVLAN,
 		Type:       nethelpers.LinkEther,

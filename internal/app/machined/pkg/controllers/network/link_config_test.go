@@ -291,6 +291,7 @@ func (suite *LinkConfigSuite) TestMachineConfiguration() {
 						switch r.TypedSpec().Name {
 						case "eth0", "eth1":
 							suite.Assert().True(r.TypedSpec().Up)
+							suite.Assert().True(r.TypedSpec().AcceptRA)
 							suite.Assert().False(r.TypedSpec().Logical)
 
 							if r.TypedSpec().Name == "eth0" {
@@ -300,6 +301,7 @@ func (suite *LinkConfigSuite) TestMachineConfiguration() {
 							}
 						case "eth0.24", "eth0.48":
 							suite.Assert().True(r.TypedSpec().Up)
+							suite.Assert().True(r.TypedSpec().AcceptRA)
 							suite.Assert().True(r.TypedSpec().Logical)
 							suite.Assert().Equal(nethelpers.LinkEther, r.TypedSpec().Type)
 							suite.Assert().Equal(network.LinkKindVLAN, r.TypedSpec().Kind)
@@ -319,6 +321,7 @@ func (suite *LinkConfigSuite) TestMachineConfiguration() {
 							suite.Assert().Equal("bond0", r.TypedSpec().BondSlave.MasterName)
 						case "bond0":
 							suite.Assert().True(r.TypedSpec().Up)
+							suite.Assert().True(r.TypedSpec().AcceptRA)
 							suite.Assert().True(r.TypedSpec().Logical)
 							suite.Assert().Equal(nethelpers.LinkEther, r.TypedSpec().Type)
 							suite.Assert().Equal(network.LinkKindBond, r.TypedSpec().Kind)

@@ -22,6 +22,7 @@ func TestLinkSpecMarshalYAML(t *testing.T) {
 		Name:       "eth0",
 		Logical:    true,
 		Up:         true,
+		AcceptRA:   true,
 		MTU:        1437,
 		Kind:       "eth",
 		Type:       nethelpers.LinkEther,
@@ -87,6 +88,7 @@ func TestLinkSpecMarshalYAML(t *testing.T) {
 		`name: eth0
 logical: true
 up: true
+acceptRa: true
 mtu: 1437
 kind: eth
 type: ether

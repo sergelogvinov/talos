@@ -181,6 +181,7 @@ func ParseCmdlineNetwork(cmdline *procfs.Cmdline) (CmdlineNetworking, error) {
 		linkSpecSpecs = append(linkSpecSpecs, network.LinkSpecSpec{
 			Name:        settings.LinkName,
 			Up:          true,
+			AcceptRA:    true,
 			ConfigLayer: network.ConfigCmdline,
 		})
 	}
@@ -227,6 +228,7 @@ func ParseCmdlineNetwork(cmdline *procfs.Cmdline) (CmdlineNetworking, error) {
 		bondLinkSpec := network.LinkSpecSpec{
 			Name:        bondName,
 			Up:          true,
+			AcceptRA:    true,
 			ConfigLayer: network.ConfigCmdline,
 		}
 

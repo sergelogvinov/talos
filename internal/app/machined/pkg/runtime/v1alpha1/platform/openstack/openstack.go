@@ -86,6 +86,7 @@ func (o *Openstack) ParseMetadata(unmarshalledMetadataConfig *MetadataConfig, un
 				Name:        ifaces[netLinks.ID],
 				Up:          true,
 				MTU:         uint32(netLinks.MTU),
+				AcceptRA:    true,
 				ConfigLayer: network.ConfigPlatform,
 			})
 		}
@@ -109,7 +110,17 @@ func (o *Openstack) ParseMetadata(unmarshalledMetadataConfig *MetadataConfig, un
 				},
 				ConfigLayer: network.ConfigPlatform,
 			})
-		case "ipv4", "ipv6":
+		case "ipv6_dhcp", "ipv6_dhcpv6-stateless", "ipv6_dhcpv6-stateful":
+			networkConfig.Operators = append(networkConfig.Operators, network.OperatorSpecSpec{
+				Operator:  network.OperatorDHCP6,
+				LinkName:  iface,
+				RequireUp: true,
+				DHCP6: network.DHCP6OperatorSpec{
+					RouteMetric: 1024,
+				},
+				ConfigLayer: network.ConfigPlatform,
+			})
+		case "ipv4", "ipv6", "ipv6_slaac":
 			var ipPrefix netaddr.IPPrefix
 
 			family := nethelpers.FamilyInet4

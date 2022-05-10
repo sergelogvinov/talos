@@ -47,6 +47,7 @@ func (suite *CmdlineSuite) TestParse() {
 				Type:        nethelpers.LinkEther,
 				Logical:     true,
 				Up:          true,
+				AcceptRA:    true,
 				ConfigLayer: netconfig.ConfigCmdline,
 				BondMaster: netconfig.BondMasterSpec{
 					Mode:            nethelpers.BondModeRoundrobin,
@@ -104,6 +105,7 @@ func (suite *CmdlineSuite) TestParse() {
 					{
 						Name:        "eth1",
 						Up:          true,
+						AcceptRA:    true,
 						ConfigLayer: netconfig.ConfigCmdline,
 					},
 				},
@@ -121,6 +123,7 @@ func (suite *CmdlineSuite) TestParse() {
 					{
 						Name:        defaultIfaceName,
 						Up:          true,
+						AcceptRA:    true,
 						ConfigLayer: netconfig.ConfigCmdline,
 					},
 				},
@@ -141,6 +144,7 @@ func (suite *CmdlineSuite) TestParse() {
 					{
 						Name:        "eth1",
 						Up:          true,
+						AcceptRA:    true,
 						ConfigLayer: netconfig.ConfigCmdline,
 					},
 				},
@@ -160,6 +164,7 @@ func (suite *CmdlineSuite) TestParse() {
 					{
 						Name:        "eth1",
 						Up:          true,
+						AcceptRA:    true,
 						ConfigLayer: netconfig.ConfigCmdline,
 					},
 				},
@@ -182,6 +187,7 @@ func (suite *CmdlineSuite) TestParse() {
 					{
 						Name:        "eth1",
 						Up:          true,
+						AcceptRA:    true,
 						ConfigLayer: netconfig.ConfigCmdline,
 					},
 				},
@@ -224,6 +230,7 @@ func (suite *CmdlineSuite) TestParse() {
 						Type:        nethelpers.LinkEther,
 						Logical:     true,
 						Up:          true,
+						AcceptRA:    true,
 						ConfigLayer: netconfig.ConfigCmdline,
 						BondMaster: netconfig.BondMasterSpec{
 							ResendIGMP:      1,
@@ -268,6 +275,7 @@ func (suite *CmdlineSuite) TestParse() {
 						Type:        nethelpers.LinkEther,
 						Logical:     true,
 						Up:          true,
+						AcceptRA:    true,
 						MTU:         1450,
 						ConfigLayer: netconfig.ConfigCmdline,
 						BondMaster: netconfig.BondMasterSpec{

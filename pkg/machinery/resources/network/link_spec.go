@@ -32,6 +32,9 @@ type LinkSpecSpec struct {
 	// TODO: make *bool ?
 	Up bool `yaml:"up"`
 
+	// IPv6 accept router advertisement.
+	AcceptRA bool `yaml:"acceptRa,omitempty"`
+
 	// Interface MTU (always applies).
 	MTU uint32 `yaml:"mtu"`
 
