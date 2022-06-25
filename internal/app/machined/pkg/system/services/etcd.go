@@ -28,6 +28,7 @@ import (
 	"github.com/talos-systems/net"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	snapshot "go.etcd.io/etcd/etcdutl/v3/snapshot"
+	"inet.af/netaddr"
 
 	"github.com/talos-systems/talos/internal/app/machined/pkg/runtime"
 	"github.com/talos-systems/talos/internal/app/machined/pkg/runtime/v1alpha1/bootloader"
@@ -44,6 +45,7 @@ import (
 	"github.com/talos-systems/talos/pkg/logging"
 	"github.com/talos-systems/talos/pkg/machinery/config/types/v1alpha1/machine"
 	"github.com/talos-systems/talos/pkg/machinery/constants"
+	"github.com/talos-systems/talos/pkg/machinery/resources/k8s"
 	"github.com/talos-systems/talos/pkg/machinery/resources/network"
 	"github.com/talos-systems/talos/pkg/machinery/resources/secrets"
 	timeresource "github.com/talos-systems/talos/pkg/machinery/resources/time"
@@ -468,7 +470,15 @@ func (e *Etcd) argsForInit(ctx context.Context, r runtime.Runtime) error {
 		_, upgraded = meta.LegacyADV.ReadTag(adv.Upgrade)
 	}
 
-	primaryAddr, listenAddress, err := primaryAndListenAddresses(r.Config().Cluster().Etcd().Subnet())
+	addressesResource, err := r.State().V1Alpha2().Resources().Get(ctx,
+		resource.NewMetadata(network.NamespaceName, network.NodeAddressType, network.FilteredNodeAddressID(network.NodeAddressAccumulativeID, k8s.NodeAddressFilterNoK8s), resource.VersionUndefined))
+	if err != nil {
+		return err
+	}
+
+	nodeAddresses := addressesResource.(*network.NodeAddress).TypedSpec()
+
+	advAddr, listenAddress, listenPeerAddress, err := advAndListenIPs(nodeAddresses.IPs(), r.Config().Cluster().Etcd().Subnet())
 	if err != nil {
 		return fmt.Errorf("failed to calculate etcd addresses: %w", err)
 	}
@@ -479,8 +489,8 @@ func (e *Etcd) argsForInit(ctx context.Context, r runtime.Runtime) error {
 		"auto-tls":                           "false",
 		"peer-auto-tls":                      "false",
 		"data-dir":                           constants.EtcdDataPath,
-		"listen-peer-urls":                   "https://" + net.FormatAddress(listenAddress) + ":2380",
-		"listen-client-urls":                 "https://" + net.FormatAddress(listenAddress) + ":2379",
+		"listen-peer-urls":                   ipsToUrls(listenPeerAddress, 2380),
+		"listen-client-urls":                 ipsToUrls(listenAddress, 2379),
 		"client-cert-auth":                   "true",
 		"cert-file":                          constants.KubernetesEtcdCert,
 		"key-file":                           constants.KubernetesEtcdKey,
@@ -509,12 +519,12 @@ func (e *Etcd) argsForInit(ctx context.Context, r runtime.Runtime) error {
 		}
 
 		if ok {
-			initialCluster := fmt.Sprintf("%s=https://%s:2380", hostname, net.FormatAddress(primaryAddr))
+			initialCluster := fmt.Sprintf("%s=https://%s:2380", hostname, net.FormatAddress(advAddr))
 
 			if upgraded {
 				denyListArgs.Set("initial-cluster-state", "existing")
 
-				initialCluster, e.learnerMemberID, err = buildInitialCluster(ctx, r, hostname, primaryAddr)
+				initialCluster, e.learnerMemberID, err = buildInitialCluster(ctx, r, hostname, advAddr)
 				if err != nil {
 					return err
 				}
@@ -527,11 +537,11 @@ func (e *Etcd) argsForInit(ctx context.Context, r runtime.Runtime) error {
 	}
 
 	if !extraArgs.Contains("initial-advertise-peer-urls") {
-		denyListArgs.Set("initial-advertise-peer-urls", fmt.Sprintf("https://%s:2380", net.FormatAddress(primaryAddr)))
+		denyListArgs.Set("initial-advertise-peer-urls", fmt.Sprintf("https://%s:2380", net.FormatAddress(advAddr)))
 	}
 
 	if !extraArgs.Contains("advertise-client-urls") {
-		denyListArgs.Set("advertise-client-urls", fmt.Sprintf("https://%s:2379", net.FormatAddress(primaryAddr)))
+		denyListArgs.Set("advertise-client-urls", fmt.Sprintf("https://%s:2379", net.FormatAddress(advAddr)))
 	}
 
 	if err := denyListArgs.Merge(extraArgs, denyList); err != nil {
@@ -550,12 +560,20 @@ func (e *Etcd) argsForControlPlane(ctx context.Context, r runtime.Runtime) error
 		return err
 	}
 
+	addressesResource, err := r.State().V1Alpha2().Resources().Get(ctx,
+		resource.NewMetadata(network.NamespaceName, network.NodeAddressType, network.FilteredNodeAddressID(network.NodeAddressAccumulativeID, k8s.NodeAddressFilterNoK8s), resource.VersionUndefined))
+	if err != nil {
+		return err
+	}
+
+	nodeAddresses := addressesResource.(*network.NodeAddress).TypedSpec()
+
 	// TODO(scm):  With the current setup, the listen (bind) address is
 	// essentially hard-coded because we need to calculate it before we process
 	// extraArgs (which may contain special overrides from the user.
 	// This needs to be refactored to allow greater binding flexibility.
 	// Issue #2121.
-	primaryAddr, listenAddress, err := primaryAndListenAddresses(r.Config().Cluster().Etcd().Subnet())
+	advAddr, listenAddress, listenPeerAddress, err := advAndListenIPs(nodeAddresses.IPs(), r.Config().Cluster().Etcd().Subnet())
 	if err != nil {
 		return fmt.Errorf("failed to calculate etcd addresses: %w", err)
 	}
@@ -565,8 +583,8 @@ func (e *Etcd) argsForControlPlane(ctx context.Context, r runtime.Runtime) error
 		"auto-tls":                           "false",
 		"peer-auto-tls":                      "false",
 		"data-dir":                           constants.EtcdDataPath,
-		"listen-peer-urls":                   "https://" + net.FormatAddress(listenAddress) + ":2380",
-		"listen-client-urls":                 "https://" + net.FormatAddress(listenAddress) + ":2379",
+		"listen-peer-urls":                   ipsToUrls(listenPeerAddress, 2380),
+		"listen-client-urls":                 ipsToUrls(listenAddress, 2379),
 		"client-cert-auth":                   "true",
 		"cert-file":                          constants.KubernetesEtcdCert,
 		"key-file":                           constants.KubernetesEtcdKey,
@@ -583,7 +601,7 @@ func (e *Etcd) argsForControlPlane(ctx context.Context, r runtime.Runtime) error
 	denyList := argsbuilder.WithDenyList(denyListArgs)
 
 	if e.RecoverFromSnapshot {
-		if err = e.recoverFromSnapshot(hostname, primaryAddr); err != nil {
+		if err = e.recoverFromSnapshot(hostname, advAddr); err != nil {
 			return err
 		}
 	}
@@ -608,9 +626,9 @@ func (e *Etcd) argsForControlPlane(ctx context.Context, r runtime.Runtime) error
 			var initialCluster string
 
 			if e.Bootstrap {
-				initialCluster = fmt.Sprintf("%s=https://%s:2380", hostname, net.FormatAddress(primaryAddr))
+				initialCluster = fmt.Sprintf("%s=https://%s:2380", hostname, net.FormatAddress(advAddr))
 			} else {
-				initialCluster, e.learnerMemberID, err = buildInitialCluster(ctx, r, hostname, primaryAddr)
+				initialCluster, e.learnerMemberID, err = buildInitialCluster(ctx, r, hostname, advAddr)
 				if err != nil {
 					return fmt.Errorf("failed to build initial etcd cluster: %w", err)
 				}
@@ -620,12 +638,12 @@ func (e *Etcd) argsForControlPlane(ctx context.Context, r runtime.Runtime) error
 		}
 
 		if !extraArgs.Contains("initial-advertise-peer-urls") {
-			denyListArgs.Set("initial-advertise-peer-urls", fmt.Sprintf("https://%s:2380", net.FormatAddress(primaryAddr)))
+			denyListArgs.Set("initial-advertise-peer-urls", fmt.Sprintf("https://%s:2380", net.FormatAddress(advAddr)))
 		}
 	}
 
 	if !extraArgs.Contains("advertise-client-urls") {
-		denyListArgs.Set("advertise-client-urls", fmt.Sprintf("https://%s:2379", net.FormatAddress(primaryAddr)))
+		denyListArgs.Set("advertise-client-urls", fmt.Sprintf("https://%s:2379", net.FormatAddress(advAddr)))
 	}
 
 	if err = denyListArgs.Merge(extraArgs, denyList); err != nil {
@@ -638,7 +656,7 @@ func (e *Etcd) argsForControlPlane(ctx context.Context, r runtime.Runtime) error
 }
 
 // recoverFromSnapshot recovers etcd data directory from the snapshot uploaded previously.
-func (e *Etcd) recoverFromSnapshot(hostname, primaryAddr string) error {
+func (e *Etcd) recoverFromSnapshot(hostname, advAddr string) error {
 	manager := snapshot.NewV3(logging.Wrap(log.Writer()))
 
 	status, err := manager.Status(constants.EtcdRecoverySnapshotPath)
@@ -655,9 +673,9 @@ func (e *Etcd) recoverFromSnapshot(hostname, primaryAddr string) error {
 		Name:          hostname,
 		OutputDataDir: constants.EtcdDataPath,
 
-		PeerURLs: []string{"https://" + net.FormatAddress(primaryAddr) + ":2380"},
+		PeerURLs: []string{"https://" + net.FormatAddress(advAddr) + ":2380"},
 
-		InitialCluster: fmt.Sprintf("%s=https://%s:2380", hostname, net.FormatAddress(primaryAddr)),
+		InitialCluster: fmt.Sprintf("%s=https://%s:2380", hostname, net.FormatAddress(advAddr)),
 
 		SkipHashCheck: e.RecoverSkipHashCheck,
 	}); err != nil {
@@ -709,47 +727,79 @@ func IsDirEmpty(name string) (bool, error) {
 	return false, err
 }
 
-// primaryAndListenAddresses calculates the primary (advertised) and listen (bind) addresses for etcd.
-func primaryAndListenAddresses(subnet string) (primary, listen string, err error) {
+// advAndListenIPs calculates the adv (advertised) and listen (bind) addresses for etcd.
+func advAndListenIPs(vips []netaddr.IP, subnet string) (adv string, listen, listenPeer []string, err error) {
 	ips, err := net.IPAddrs()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to discover interface IP addresses: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to discover interface IP addresses: %w", err)
 	}
 
 	ips = net.IPFilter(ips, network.NotSideroLinkStdIP)
 
 	if len(ips) == 0 {
-		return "", "", errors.New("no valid unicast IP addresses on any interface")
+		return "", nil, nil, errors.New("no valid unicast IP addresses on any interface")
 	}
 
+	listenPeer = []string{"0.0.0.0"}
+	if net.IsIPv6(ips...) {
+		listenPeer = []string{"::"}
+	}
+
+	listen = listenPeer
+
 	if subnet == "" {
-		primary = ips[0].String()
+		adv = ips[0].String()
 	} else {
 		network, err := net.ParseCIDR(subnet)
 		if err != nil {
-			return "", "", fmt.Errorf("failed to parse subnet: %w", err)
+			return "", nil, nil, fmt.Errorf("failed to parse subnet: %w", err)
 		}
 
 		for _, ip := range ips {
 			if network.Contains(ip) {
-				primary = ip.String()
+				adv = ip.String()
+				listenPeer = []string{ip.String()}
+				// listen = listenPeer
+
+				// if net.IsIPv6(ips...) {
+				// 	listen = append(listen, "127.0.0.1", "::1")
+				// } else {
+				// 	listen = append(listen, "127.0.0.1")
+				// }
 
 				break
 			}
 		}
 
-		if primary == "" {
-			return "", "", errors.New("no address matched the provided subnet")
+		// for _, ip := range vips {
+		// 	if network.Contains(ip.IPAddr().IP) {
+		// 		adv = ip.String()
+
+		// 		break
+		// 	}
+		// }
+
+		if adv == "" {
+			return "", nil, nil, errors.New("no address matched the provided subnet")
 		}
 	}
 
-	// Regardless of primary selected IP, we should be liberal with our listen
-	// address, for maximum compatibility.  Again, this should probably be
-	// exposed later for greater control.
-	listen = "0.0.0.0"
-	if net.IsIPv6(ips...) {
-		listen = "::"
+	return adv, listen, listenPeer, nil
+}
+
+// ipsToUrls.
+func ipsToUrls(ips []string, port int) (urls string) {
+	if len(ips) == 0 {
+		return fmt.Sprintf("https://127.0.0.1:%d", port)
 	}
 
-	return primary, listen, nil
+	for i, ip := range ips {
+		if i == 0 {
+			urls = fmt.Sprintf("https://%s:%d", net.FormatAddress(ip), port)
+		} else {
+			urls = fmt.Sprintf("%s,https://%s:%d", urls, net.FormatAddress(ip), port)
+		}
+	}
+
+	return urls
 }

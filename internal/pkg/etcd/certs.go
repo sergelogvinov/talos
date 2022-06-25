@@ -66,10 +66,8 @@ func GeneratePeerCert(etcdCA *x509.PEMEncodedCertificateAndKey, sansIP []stdlibn
 			stdlibnet.ParseIP("::1"),
 		}
 
-		ips = append(ips, sansIP...)
-
 		opts = append(opts,
-			x509.IPAddresses(ips),
+			x509.IPAddresses(append(ips, sansIP...)),
 		)
 	}
 
