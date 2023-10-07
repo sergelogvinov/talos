@@ -17,23 +17,26 @@ import (
 	"github.com/cosi-project/runtime/pkg/state"
 	"github.com/siderolabs/go-procfs/procfs"
 
+	networkctrl "github.com/siderolabs/talos/internal/app/machined/pkg/controllers/network"
 	"github.com/siderolabs/talos/internal/app/machined/pkg/runtime"
 	"github.com/siderolabs/talos/internal/app/machined/pkg/runtime/v1alpha1/platform/errors"
 	"github.com/siderolabs/talos/internal/app/machined/pkg/runtime/v1alpha1/platform/internal/netutils"
 	"github.com/siderolabs/talos/pkg/download"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
+	"github.com/siderolabs/talos/pkg/machinery/nethelpers"
 	"github.com/siderolabs/talos/pkg/machinery/resources/network"
 	runtimeres "github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 )
 
 // NetworkConfig holds network interface meta config.
 type NetworkConfig struct {
-	HWAddr              string `json:"macAddr"`
-	PrivateIP           string `json:"privateIp"`
-	VirtualRouterIP     string `json:"virtualRouterIp"`
-	SubnetCidrBlock     string `json:"subnetCidrBlock"`
-	Ipv6SubnetCidrBlock string `json:"ipv6SubnetCidrBlock,omitempty"`
-	Ipv6VirtualRouterIP string `json:"ipv6VirtualRouterIp,omitempty"`
+	HWAddr              string   `json:"macAddr"`
+	PrivateIP           string   `json:"privateIp"`
+	VirtualRouterIP     string   `json:"virtualRouterIp"`
+	SubnetCidrBlock     string   `json:"subnetCidrBlock"`
+	Ipv6SubnetCidrBlock string   `json:"ipv6SubnetCidrBlock,omitempty"`
+	Ipv6VirtualRouterIP string   `json:"ipv6VirtualRouterIp,omitempty"`
+	Ipv6Addresses       []string `json:"ipv6Addresses,omitempty"`
 }
 
 // Oracle is the concrete type that implements the platform.Platform interface.
@@ -45,6 +48,8 @@ func (o *Oracle) Name() string {
 }
 
 // ParseMetadata converts Oracle Cloud metadata into platform network configuration.
+//
+//nolint:gocyclo
 func (o *Oracle) ParseMetadata(interfaceAddresses []NetworkConfig, metadata *MetadataConfig) (*runtime.PlatformNetworkConfig, error) {
 	networkConfig := &runtime.PlatformNetworkConfig{}
 
@@ -62,17 +67,60 @@ func (o *Oracle) ParseMetadata(interfaceAddresses []NetworkConfig, metadata *Met
 
 	for idx, iface := range interfaceAddresses {
 		ipv6 := iface.Ipv6SubnetCidrBlock != "" && iface.Ipv6VirtualRouterIP != ""
-
 		if ipv6 {
+			if len(iface.Ipv6Addresses) > 0 {
+				networkConfig.Links = append(networkConfig.Links, network.LinkSpecSpec{
+					Name:        fmt.Sprintf("eth%d", idx),
+					Up:          true,
+					ConfigLayer: network.ConfigPlatform,
+				})
+
+				for _, ipv6 := range iface.Ipv6Addresses {
+					ipAddr, err := netip.ParsePrefix(fmt.Sprintf("%s/128", ipv6))
+					if err != nil {
+						return nil, err
+					}
+
+					networkConfig.Addresses = append(networkConfig.Addresses, network.AddressSpecSpec{
+						ConfigLayer: network.ConfigPlatform,
+						LinkName:    fmt.Sprintf("eth%d", idx),
+						Address:     ipAddr,
+						Scope:       nethelpers.ScopeGlobal,
+						Flags:       nethelpers.AddressFlags(nethelpers.AddressPermanent),
+						Family:      nethelpers.FamilyInet6,
+					})
+				}
+			}
+
 			networkConfig.Operators = append(networkConfig.Operators, network.OperatorSpecSpec{
 				Operator:  network.OperatorDHCP6,
 				LinkName:  fmt.Sprintf("eth%d", idx),
 				RequireUp: true,
 				DHCP6: network.DHCP6OperatorSpec{
-					RouteMetric: 1024,
+					RouteMetric: networkctrl.DefaultRouteMetric,
 				},
 				ConfigLayer: network.ConfigPlatform,
 			})
+
+			gw, err := netip.ParseAddr(iface.Ipv6VirtualRouterIP)
+			if err != nil {
+				return nil, err
+			}
+
+			route := network.RouteSpecSpec{
+				ConfigLayer: network.ConfigPlatform,
+				Gateway:     gw,
+				OutLinkName: fmt.Sprintf("eth%d", idx),
+				Table:       nethelpers.TableMain,
+				Protocol:    nethelpers.ProtocolStatic,
+				Type:        nethelpers.TypeUnicast,
+				Family:      nethelpers.FamilyInet6,
+				Priority:    2 * networkctrl.DefaultRouteMetric,
+			}
+
+			route.Normalize()
+
+			networkConfig.Routes = append(networkConfig.Routes, route)
 		}
 	}
 
